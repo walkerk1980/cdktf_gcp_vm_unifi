@@ -1,7 +1,9 @@
 #!/usr/bin/env python
+from email.policy import default
 from constructs import Construct
 from cdktf import (
-  App, TerraformStack, RemoteBackend, NamedRemoteWorkspace, TerraformVariable, TerraformOutput, Fn
+  App, TerraformStack, RemoteBackend, NamedRemoteWorkspace, TerraformVariable, TerraformOutput, Fn,
+  Token
 )
 from imports.google import (
   ComputeInstanceBootDisk, ComputeInstanceBootDiskInitializeParams, ComputeInstanceNetworkInterface,
@@ -13,15 +15,22 @@ class MyStack(TerraformStack):
     def __init__(self, scope: Construct, ns: str):
         super().__init__(scope, ns)
 
-        # Providers
-        GoogleProvider(
-          self, 'GoogleProvider',
-          project = "unifi-236602",
-          region  = "us-central1",
-          zone    = "us-central1-c"
-        )
-
         # Variables
+        project_name = TerraformVariable(self, 'project_name',
+          type='string',
+          description='project to deploy to',
+          default='unifi-236602'
+        )
+        region_name = TerraformVariable(self, 'region_name',
+          type='string',
+          description='region to deploy to',
+          default='us-central1'
+        )
+        zone_name = TerraformVariable(self, 'zone_name',
+          type='string',
+          description='zone to deploy to',
+          default='us-central1-c'
+        )
         instance_name = TerraformVariable(self, 'instance_name',
           type='string',
           description='name for vm instance',
@@ -47,6 +56,18 @@ class MyStack(TerraformStack):
           description='image to use for vm',
           default='debian-cloud/debian-10'
         )
+        firewall_allow_port_list_tcp = TerraformVariable(self, 'firewall_allow_port_list',
+          type='list(string)',
+          default=['22', '8443', '8080']
+        )
+
+        # Providers
+        GoogleProvider(
+          self, 'GoogleProvider',
+          project = project_name.string_value,
+          region  = region_name.string_value,
+          zone    = zone_name.string_value
+        )
 
         # Resources
         vm_instance = ComputeInstance(self, 'vm_instance',
@@ -59,7 +80,7 @@ class MyStack(TerraformStack):
             )
           ),
           metadata_startup_script='sudo apt update && apt install -yq docker.io; \
-            docker run -d --name=unifi -e PUID=1000 -e PGID=1000 -e MEM_LIMIT=1024 \
+            sudo docker run -d --name=unifi -e PUID=1000 -e PGID=1000 -e MEM_LIMIT=900 \
             -e MEM_STARTUP=1024 -p 3478:3478/udp -p 10001:10001/udp -p 8080:8080 \
             -p 8443:8443 -p 1900:1900/udp -p 8843:8843 -p 8880:8880 -p 6789:6789 \
             -p 5514:5514/udp -v /config:/config --restart unless-stopped \
@@ -83,7 +104,7 @@ class MyStack(TerraformStack):
           allow=[
             ComputeFirewallAllow(
               protocol='tcp',
-              ports=['22']
+              ports=Fn.tolist(firewall_allow_port_list_tcp.list_value)
             )
           ],
           source_tags=['mynetwork']
